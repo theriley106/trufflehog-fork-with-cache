@@ -80,10 +80,10 @@ func CleanResults(results []Result) []Result {
 	}
 
 	if len(cleaned) == 0 {
-		return results[:1]
+		return results
 	}
 
-	results = results[:0]
+	results = results
 	for _, r := range cleaned {
 		results = append(results, r)
 	}

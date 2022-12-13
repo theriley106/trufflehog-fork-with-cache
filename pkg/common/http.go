@@ -130,7 +130,7 @@ func RetryableHttpClientTimeout(timeOutSeconds int64) *http.Client {
 	return httpClient.StandardClient()
 }
 
-const DefaultResponseTimeout = 5 * time.Second
+const DefaultResponseTimeout = 30 * time.Second
 
 var saneTransport = &http.Transport{
 	Proxy: http.ProxyFromEnvironment,

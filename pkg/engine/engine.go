@@ -7,6 +7,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"os"
+	"fmt"
+
+	"hash/fnv"
+	"io/ioutil"
+
 
 	"github.com/sirupsen/logrus"
 
@@ -177,6 +183,63 @@ func (e *Engine) DetectorAvgTime() map[string][]time.Duration {
 	return avgTime
 }
 
+
+func appendTextToFile(filename string, text string) {
+	// Open the file in append mode
+	file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+	  panic(err)
+	}
+	defer file.Close()
+  
+	// Append the text to the end of the file
+	if _, err := file.WriteString(text); err != nil {
+	  panic(err)
+	}
+  }
+
+func hash(s string) string {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return string(h.Sum32())
+}
+
+func checkTextInFile(text string) bool {
+	// Take the SHA256 hash of the input string
+	hashString := hash(text)
+	filename := "cache_th/" + hashString + "_cache.txt"
+	checkOrCreateFile(text, filename)
+	// Open the file with the given filename
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		panic(err)
+	}
+
+	// Check if the text appears in the file
+	if strings.Contains(string(data), text) {
+		return true
+	} else {
+		appendTextToFile(filename, text)
+		return false
+	}
+}
+
+func checkOrCreateFile(input string, filename string) {
+	
+  
+	// Check if a file with the name of the hash exists
+	_, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+	  // Create the file if it does not exist
+	  file, err := os.Create(filename)
+	  if err != nil {
+		panic(err)
+	  }
+	  defer file.Close()
+	}
+  }
+  
+
 func (e *Engine) detectorWorker(ctx context.Context) {
 	for originalChunk := range e.chunks {
 		for chunk := range sources.Chunker(originalChunk) {
@@ -211,12 +274,12 @@ func (e *Engine) detectorWorker(ctx context.Context) {
 						if !foundKeyword {
 							continue
 						}
-
+						// log.Warn(ctx)
 						results, err := func() ([]detectors.Result, error) {
 							ctx, cancel := context.WithTimeout(ctx, time.Second*10)
 							defer cancel()
 							defer common.Recover(ctx)
-							return detector.FromData(ctx, verify, decoded.Data)
+							return detector.FromData(ctx, false, decoded.Data)
 						}()
 						if err != nil {
 							logrus.WithFields(logrus.Fields{
@@ -226,29 +289,54 @@ func (e *Engine) detectorWorker(ctx context.Context) {
 							continue
 						}
 
-						if e.filterUnverified {
-							results = detectors.CleanResults(results)
-						}
-						for _, result := range results {
-							SetResultLineNumber(chunk, &result, fragStart, mdLine)
-							result.DecoderType = decoderType
-							e.results <- detectors.CopyMetadata(chunk, result)
+						key := fmt.Sprint(results)
 
-						}
-						if len(results) > 0 {
-							elapsed := time.Since(start)
-							detectorName := results[0].DetectorType.String()
-							avgTimeI, ok := e.detectorAvgTime.Load(detectorName)
-							var avgTime []time.Duration
-							if ok {
-								avgTime, ok = avgTimeI.([]time.Duration)
-								if !ok {
-									continue
+						if !checkTextInFile(key) {
+						
+							// log.Warn(ctx)
+							results, err := func() ([]detectors.Result, error) {
+								ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+								defer cancel()
+								defer common.Recover(ctx)
+								return detector.FromData(ctx, verify, decoded.Data)
+							}()
+							if err != nil {
+								logrus.WithFields(logrus.Fields{
+									"source_type": decoded.SourceType.String(),
+									"metadata":    decoded.SourceMetadata,
+								}).WithError(err).Error("could not scan chunk")
+								continue
+							}
+	
+							
+							if true {
+								if e.filterUnverified {
+									results = detectors.CleanResults(results)
+								}
+								for _, result := range results {
+									SetResultLineNumber(chunk, &result, fragStart, mdLine)
+									result.DecoderType = decoderType
+									e.results <- detectors.CopyMetadata(chunk, result)
+		
+								}
+								if len(results) > 0 {
+									elapsed := time.Since(start)
+									detectorName := results[0].DetectorType.String()
+									avgTimeI, ok := e.detectorAvgTime.Load(detectorName)
+									var avgTime []time.Duration
+									if ok {
+										avgTime, ok = avgTimeI.([]time.Duration)
+										if !ok {
+											continue
+										}
+									}
+									avgTime = append(avgTime, elapsed)
+									e.detectorAvgTime.Store(detectorName, avgTime)
 								}
 							}
-							avgTime = append(avgTime, elapsed)
-							e.detectorAvgTime.Store(detectorName, avgTime)
 						}
+						
+						
 					}
 				}
 			}
