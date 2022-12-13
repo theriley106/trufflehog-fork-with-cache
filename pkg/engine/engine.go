@@ -201,7 +201,7 @@ func appendTextToFile(filename string, text string) {
 func hash(s string) string {
 	h := fnv.New32a()
 	h.Write([]byte(s))
-	return string(h.Sum32())
+	return fmt.Sprintf("%x", h.Sum32())
 }
 
 func checkTextInFile(text string) bool {
